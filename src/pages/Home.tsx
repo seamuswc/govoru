@@ -1,0 +1,1248 @@
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Progress } from '@/components/ui/progress'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  BarChart3,
+  BookOpenText,
+  Eye,
+  Flame,
+  GraduationCap,
+  Import,
+  Layers,
+  Library as LibraryIcon,
+  Plus,
+  RotateCcw,
+  Search,
+  Sparkles,
+  Trash2,
+  UserRound,
+  UserRoundPlus,
+} from 'lucide-react'
+import {
+  type Account,
+  type AppState,
+  type Card,
+  type CardKind,
+  FLUENT_LEVEL,
+  type Grade,
+  LEVEL_NAMES,
+  createAccount,
+  deleteAccount,
+  demoState,
+  dueCards,
+  findVerb,
+  fluencyPercent,
+  formatDue,
+  formatInterval,
+  getCurrentAccount,
+  gradeCard,
+  gradePreview,
+  gradeSimple,
+  groupMastery,
+  intervalForLevel,
+  listAccounts,
+  loadState,
+  makeCard,
+  newCards,
+  nextDue,
+  parseBulk,
+  resetState,
+  saveState,
+  setCurrentAccount,
+  streakDays,
+  todayKey,
+  verbConjugationCards,
+  wordGroups,
+} from '@/lib/srs'
+
+type Tab = 'review' | 'add' | 'library' | 'progress'
+
+const LEVEL_COLORS = [
+  'bg-stone-200 text-stone-700',
+  'bg-red-100 text-red-700',
+  'bg-orange-100 text-orange-700',
+  'bg-amber-100 text-amber-700',
+  'bg-yellow-100 text-yellow-800',
+  'bg-lime-100 text-lime-800',
+  'bg-green-100 text-green-800',
+  'bg-emerald-600 text-white',
+]
+
+const KIND_STYLES: Record<CardKind, string> = {
+  word: 'bg-sky-100 text-sky-800 border-sky-200',
+  conjugation: 'bg-violet-100 text-violet-800 border-violet-200',
+}
+
+function LevelPill({ level }: { level: number }) {
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${LEVEL_COLORS[level]}`}
+    >
+      L{level} · {LEVEL_NAMES[level]}
+    </span>
+  )
+}
+
+export default function Home() {
+  const [account, setAccount] = useState<string | null>(() => getCurrentAccount())
+  const [demo, setDemo] = useState(false)
+  const [showAccounts, setShowAccounts] = useState(false)
+
+  // account screen is an overlay — the normal app view is the default
+  if (showAccounts) {
+    return (
+      <AccountScreen
+        onPick={(name) => {
+          setCurrentAccount(name)
+          setAccount(name)
+          setDemo(false)
+          setShowAccounts(false)
+        }}
+        onDemo={() => {
+          setCurrentAccount(null)
+          setAccount(null)
+          setDemo(true)
+          setShowAccounts(false)
+        }}
+        onBack={() => setShowAccounts(false)}
+      />
+    )
+  }
+
+  // signed-out visitors get demo mode by default (20 fixed words, unsaved);
+  // signing in unlocks the full deck with saved progress
+  const isDemo = demo || !account
+  return (
+    <StudyApp
+      key={isDemo ? 'demo' : (account ?? 'demo')} // remount when the profile changes
+      account={isDemo ? 'Demo' : (account ?? 'Demo')}
+      displayAccount={account}
+      demo={isDemo}
+      onOpenAccounts={() => setShowAccounts(true)}
+    />
+  )
+}
+
+function StudyApp({
+  account,
+  displayAccount,
+  demo = false,
+  onOpenAccounts,
+}: {
+  account: string
+  displayAccount: string | null
+  demo?: boolean
+  onOpenAccounts: () => void
+}) {
+  const [state, setState] = useState<AppState>(() => (demo ? demoState() : loadState(account)))
+  const [tab, setTab] = useState<Tab>('review')
+  const [now, setNow] = useState(() => Date.now())
+  const [sessionCount, setSessionCount] = useState(0)
+
+  useEffect(() => {
+    if (!demo) saveState(state, account) // demo progress is never saved
+  }, [state, account, demo])
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 15_000)
+    return () => clearInterval(t)
+  }, [])
+
+  const due = useMemo(() => dueCards(state.cards, now), [state.cards, now])
+  const fresh = useMemo(() => newCards(state.cards), [state.cards])
+  const introducedToday = state.introLog[todayKey(now)] ?? 0
+  const quotaLeft = Math.max(0, state.newPerDay - introducedToday)
+  const todaysNew = useMemo(() => fresh.slice(0, quotaLeft), [fresh, quotaLeft])
+  const queue = useMemo(() => [...due, ...todaysNew], [due, todaysNew])
+
+  const streak = useMemo(() => streakDays(state.history, now), [state.history, now])
+  const reviewsToday = state.history[todayKey(now)] ?? 0
+
+  const applyResult = useCallback((card: Card, next: Card, t: number) => {
+    const key = todayKey(t)
+    setState((s) => ({
+      ...s,
+      cards: s.cards.map((c) => (c.id === card.id ? next : c)),
+      history: { ...s.history, [key]: (s.history[key] ?? 0) + 1 },
+      introLog: card.introduced
+        ? s.introLog
+        : { ...s.introLog, [key]: (s.introLog[key] ?? 0) + 1 },
+    }))
+    setSessionCount((n) => n + 1)
+  }, [])
+
+  const grade = useCallback(
+    (card: Card, g: Grade) => {
+      const t = Date.now()
+      setNow(t)
+      applyResult(card, gradeCard(card, g, t), t)
+    },
+    [applyResult],
+  )
+
+  const gradeBinary = useCallback(
+    (card: Card, correct: boolean) => {
+      const t = Date.now()
+      setNow(t)
+      applyResult(card, gradeSimple(card, correct, t), t)
+    },
+    [applyResult],
+  )
+
+  const addCards = useCallback(
+    (
+      inputs: Array<{ front: string; back: string; kind: CardKind; base?: string; note?: string }>,
+    ) => {
+      setState((s) => {
+        const existing = new Set(s.cards.map((c) => `${c.front}|${c.kind}`))
+        const fresh = inputs.filter((i) => !existing.has(`${i.front.trim()}|${i.kind}`))
+        return { ...s, cards: [...s.cards, ...fresh.map(makeCard)] }
+      })
+    },
+    [],
+  )
+
+  const deleteCard = useCallback((id: string) => {
+    setState((s) => ({ ...s, cards: s.cards.filter((c) => c.id !== id) }))
+  }, [])
+
+  const setNewPerDay = useCallback((n: number) => {
+    setState((s) => ({ ...s, newPerDay: n }))
+  }, [])
+
+  const setGrading = useCallback((grading: 'simple' | 'grades') => {
+    setState((s) => ({ ...s, grading }))
+  }, [])
+
+  const resetAll = useCallback(() => {
+    if (demo) {
+      setState(demoState())
+    } else {
+      resetState(account)
+      setState(loadState(account))
+    }
+    setSessionCount(0)
+  }, [account, demo])
+
+  return (
+    <div className="min-h-screen bg-stone-50 text-stone-900">
+      <header className="sticky top-0 z-10 border-b border-stone-200 bg-stone-50/90 backdrop-blur">
+        <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-3">
+          <div className="flex items-center gap-2">
+            <GraduationCap className="h-6 w-6 text-emerald-700" />
+            <h1 className="text-lg font-semibold tracking-tight">SRS Fluency</h1>
+            <span className="hidden text-xs text-stone-500 sm:inline">
+              русский · 0 → fluent
+            </span>
+          </div>
+          <div className="flex items-center gap-3 text-sm">
+            <span className="flex items-center gap-1 text-orange-600" title="Day streak">
+              <Flame className="h-4 w-4" /> {streak}
+            </span>
+            <Badge variant={queue.length ? 'default' : 'secondary'} className="tabular-nums">
+              {queue.length} to study
+            </Badge>
+            {displayAccount ? (
+              <button
+                onClick={onOpenAccounts}
+                className="flex items-center gap-1 rounded-full border border-stone-200 bg-white px-2 py-0.5 text-xs text-stone-600 hover:border-emerald-400 hover:text-emerald-700"
+                title="Accounts"
+              >
+                <UserRound className="h-3.5 w-3.5" /> {displayAccount}
+              </button>
+            ) : (
+              <button
+                onClick={onOpenAccounts}
+                className="flex items-center gap-1 rounded-full bg-emerald-700 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-800"
+                title="Sign in or create an account"
+              >
+                <UserRoundPlus className="h-3.5 w-3.5" /> Sign in
+              </button>
+            )}
+          </div>
+        </div>
+        <nav className="mx-auto flex max-w-3xl gap-1 px-4 pb-2">
+          {(
+            [
+              ['review', BookOpenText, 'Review'],
+              ['add', Plus, 'Add'],
+              ['library', LibraryIcon, 'Library'],
+              ['progress', BarChart3, 'Progress'],
+            ] as const
+          ).map(([key, Icon, label]) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                tab === key
+                  ? 'bg-emerald-700 text-white'
+                  : 'text-stone-600 hover:bg-stone-200'
+              }`}
+            >
+              <Icon className="h-4 w-4" /> {label}
+              {key === 'review' && queue.length > 0 && (
+                <span
+                  className={`ml-1 rounded-full px-1.5 text-xs tabular-nums ${
+                    tab === key ? 'bg-white/25' : 'bg-emerald-100 text-emerald-800'
+                  }`}
+                >
+                  {queue.length}
+                </span>
+              )}
+            </button>
+          ))}
+        </nav>
+      </header>
+
+      <main className="mx-auto max-w-3xl px-4 py-6">
+        {demo && (
+          <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+            <span>
+              <strong>Demo mode</strong> — the same 20 words for every visitor. Progress won't be
+              saved.
+            </span>
+            <Button size="sm" variant="outline" onClick={onOpenAccounts} className="shrink-0">
+              Create account
+            </Button>
+          </div>
+        )}
+        {tab === 'review' && (
+          <ReviewView
+            queue={queue}
+            dueCount={due.length}
+            freshBacklog={fresh.length}
+            quotaLeft={quotaLeft}
+            newPerDay={state.newPerDay}
+            cards={state.cards}
+            now={now}
+            sessionCount={sessionCount}
+            reviewsToday={reviewsToday}
+            onGrade={grade}
+            onSimple={gradeBinary}
+            grading={state.grading}
+            onToggleGrading={setGrading}
+            goAdd={() => setTab('add')}
+          />
+        )}
+        {tab === 'add' && <AddView onAdd={addCards} />}
+        {tab === 'library' && (
+          <LibraryView cards={state.cards} now={now} onDelete={deleteCard} />
+        )}
+        {tab === 'progress' && (
+          <ProgressView
+            state={state}
+            now={now}
+            streak={streak}
+            reviewsToday={reviewsToday}
+            introducedToday={introducedToday}
+            onSetNewPerDay={setNewPerDay}
+            onReset={resetAll}
+          />
+        )}
+      </main>
+    </div>
+  )
+}
+
+// ─── Review ─────────────────────────────────────────────────────────────────
+
+function ReviewView({
+  queue,
+  dueCount,
+  freshBacklog,
+  quotaLeft,
+  newPerDay,
+  cards,
+  now,
+  sessionCount,
+  reviewsToday,
+  onGrade,
+  onSimple,
+  grading,
+  onToggleGrading,
+  goAdd,
+}: {
+  queue: Card[]
+  dueCount: number
+  freshBacklog: number
+  quotaLeft: number
+  newPerDay: number
+  cards: Card[]
+  now: number
+  sessionCount: number
+  reviewsToday: number
+  onGrade: (card: Card, g: Grade) => void
+  onSimple: (card: Card, correct: boolean) => void
+  grading: 'simple' | 'grades'
+  onToggleGrading: (m: 'simple' | 'grades') => void
+  goAdd: () => void
+}) {
+  const [revealed, setRevealed] = useState(false)
+  const card = queue[0]
+  const isNew = card ? !card.introduced : false
+
+  useEffect(() => setRevealed(false), [card?.id])
+
+  const pick = useCallback(
+    (g: Grade) => {
+      if (!card || !revealed) return
+      onGrade(card, g)
+      setRevealed(false)
+    },
+    [card, revealed, onGrade],
+  )
+
+  const pickSimple = useCallback(
+    (correct: boolean) => {
+      if (!card || !revealed) return
+      onSimple(card, correct)
+      setRevealed(false)
+    },
+    [card, revealed, onSimple],
+  )
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      if (!card) return
+      if (e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault()
+        if (!revealed) setRevealed(true)
+      }
+      if (revealed) {
+        if (grading === 'simple') {
+          if (e.key === '1' || e.key === 'ArrowLeft') pickSimple(false)
+          if (e.key === '2' || e.key === 'ArrowRight') pickSimple(true)
+        } else {
+          if (e.key === '1') pick('again')
+          if (e.key === '2') pick('hard')
+          if (e.key === '3') pick('good')
+          if (e.key === '4') pick('easy')
+        }
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [card, revealed, pick, pickSimple, grading])
+
+  if (!card) {
+    const next = nextDue(cards, now)
+    return (
+      <div className="flex flex-col items-center gap-4 py-20 text-center">
+        <Sparkles className="h-10 w-10 text-emerald-600" />
+        <h2 className="text-2xl font-semibold">Всё! All caught up</h2>
+        <p className="max-w-sm text-stone-500">
+          Nothing left to study right now.
+          {next ? ` Next review ${formatDue(next, now)}.` : ''}
+          {freshBacklog > 0 &&
+            ` ${freshBacklog} new card${freshBacklog === 1 ? '' : 's'} waiting in the backlog — today's quota of ${newPerDay} is used up.`}
+        </p>
+        {sessionCount > 0 && (
+          <p className="text-sm text-emerald-700">
+            {sessionCount} studied this session · {reviewsToday} today
+          </p>
+        )}
+        <Button variant="outline" onClick={goAdd}>
+          <Plus className="mr-1 h-4 w-4" /> Add cards
+        </Button>
+      </div>
+    )
+  }
+
+  const preview = gradePreview(card)
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between text-sm text-stone-500">
+        <span>
+          {dueCount} due
+          {queue.length - dueCount > 0 && ` + ${queue.length - dueCount} new`}
+          {freshBacklog > 0 && (
+            <span className="text-stone-400">
+              {' '}
+              · {freshBacklog} in backlog ({quotaLeft} new left today)
+            </span>
+          )}
+        </span>
+        <span className="flex items-center gap-3 tabular-nums">
+          <button
+            onClick={() => onToggleGrading(grading === 'simple' ? 'grades' : 'simple')}
+            className="rounded-full border border-stone-200 bg-white px-2 py-0.5 text-xs text-stone-500 hover:border-emerald-400 hover:text-emerald-700"
+            title="Switch grading style"
+          >
+            {grading === 'simple' ? '+/− scoring' : '4-grade scoring'}
+          </button>
+          {sessionCount} this session · {reviewsToday} today
+        </span>
+      </div>
+
+      <div className="rounded-2xl border border-stone-200 bg-white shadow-sm">
+        <div className="flex items-center gap-2 border-b border-stone-100 px-6 pt-4 pb-3">
+          <span
+            className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${KIND_STYLES[card.kind]}`}
+          >
+            {card.kind}
+          </span>
+          {isNew && (
+            <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-medium text-white">
+              new card
+            </span>
+          )}
+          {card.base && (
+            <span className="flex items-center gap-1 text-xs text-stone-500">
+              <Layers className="h-3 w-3" /> of <em className="font-medium">{card.base}</em>
+            </span>
+          )}
+          <span className="ml-auto">
+            <LevelPill level={card.level} />
+          </span>
+        </div>
+
+        <button
+          onClick={() => setRevealed(true)}
+          className="block w-full cursor-pointer px-6 py-12 text-center"
+        >
+          <div className="text-4xl font-semibold tracking-tight">{card.front}</div>
+          {revealed ? (
+            <div className="mt-6">
+              <div className="text-xl text-stone-600">{card.back}</div>
+              {card.note && <div className="mt-2 text-sm text-stone-400">{card.note}</div>}
+            </div>
+          ) : (
+            <div className="mt-6 flex items-center justify-center gap-1 text-sm text-stone-400">
+              <Eye className="h-4 w-4" /> tap or press space to reveal
+            </div>
+          )}
+        </button>
+
+        {grading === 'simple' ? (
+          <div className="grid grid-cols-2 gap-2 border-t border-stone-100 p-4">
+            <button
+              disabled={!revealed}
+              onClick={() => pickSimple(false)}
+              className="flex flex-col items-center rounded-lg border border-red-200 bg-red-50 px-2 py-3 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <span className="text-base">✗ Wrong</span>
+              <span className="mt-0.5 text-xs font-normal opacity-70">
+                −1 level · back in 10m
+              </span>
+              <kbd className="mt-1 hidden rounded bg-white/60 px-1 text-[10px] text-stone-400 sm:inline">
+                1
+              </kbd>
+            </button>
+            <button
+              disabled={!revealed}
+              onClick={() => pickSimple(true)}
+              className="flex flex-col items-center rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-3 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <span className="text-base">✓ Right</span>
+              <span className="mt-0.5 text-xs font-normal opacity-70 tabular-nums">
+                +1 level · next in{' '}
+                {formatInterval(intervalForLevel(Math.min(FLUENT_LEVEL, card.level + 1)))}
+              </span>
+              <kbd className="mt-1 hidden rounded bg-white/60 px-1 text-[10px] text-stone-400 sm:inline">
+                2
+              </kbd>
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-4 gap-2 border-t border-stone-100 p-4">
+            {(
+              [
+                ['again', 'Again', '1', 'bg-red-50 text-red-700 hover:bg-red-100 border-red-200'],
+                ['hard', 'Hard', '2', 'bg-amber-50 text-amber-700 hover:bg-amber-100 border-amber-200'],
+                ['good', 'Good', '3', 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-emerald-200'],
+                ['easy', 'Easy', '4', 'bg-sky-50 text-sky-700 hover:bg-sky-100 border-sky-200'],
+              ] as const
+            ).map(([g, label, key, cls]) => (
+              <button
+                key={g}
+                disabled={!revealed}
+                onClick={() => pick(g)}
+                className={`flex flex-col items-center rounded-lg border px-2 py-2.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${cls}`}
+              >
+                <span>{label}</span>
+                <span className="mt-0.5 text-xs font-normal opacity-70 tabular-nums">
+                  {preview[g]}
+                </span>
+                <kbd className="mt-1 hidden rounded bg-white/60 px-1 text-[10px] text-stone-400 sm:inline">
+                  {key}
+                </kbd>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {card.kind === 'conjugation' && card.base && (
+        <p className="text-center text-xs text-stone-400">
+          Reviewed on its own schedule — but it counts toward the mastery of{' '}
+          <em>{card.base}</em>:{' '}
+          <span className="font-medium text-emerald-700">
+            word mastery L
+            {groupMastery(
+              cards.filter((c) => (c.base ?? c.front) === card.base),
+            ).toFixed(1)}
+          </span>
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ─── Add (single + bulk) ────────────────────────────────────────────────────
+
+function AddView({
+  onAdd,
+}: {
+  onAdd: (
+    cards: Array<{ front: string; back: string; kind: CardKind; base?: string; note?: string }>,
+  ) => void
+}) {
+  const [front, setFront] = useState('')
+  const [back, setBack] = useState('')
+  const [kind, setKind] = useState<CardKind>('word')
+  const [base, setBase] = useState('')
+  const [note, setNote] = useState('')
+  const [flash, setFlash] = useState(false)
+
+  const [bulkText, setBulkText] = useState('')
+  const [bulkKind, setBulkKind] = useState<CardKind>('word')
+  const [bulkBase, setBulkBase] = useState('')
+  const [bulkFlash, setBulkFlash] = useState(0)
+  const [paradigmFlash, setParadigmFlash] = useState('')
+
+  const parsed = useMemo(() => parseBulk(bulkText), [bulkText])
+
+  // paradigm lookup: front (any kind) or the conjugation's base word
+  const verbHit = useMemo(() => {
+    const probe = kind === 'conjugation' ? base : front
+    return probe.trim() ? findVerb(probe) : null
+  }, [front, base, kind])
+
+  const addParadigm = () => {
+    if (!verbHit) return
+    onAdd(verbConjugationCards(verbHit))
+    setParadigmFlash(verbHit[0])
+    setTimeout(() => setParadigmFlash(''), 2500)
+  }
+
+  const submit = (keepBase: boolean) => {
+    if (!front.trim() || !back.trim()) return
+    onAdd([{ front, back, kind, base: kind === 'conjugation' ? base : undefined, note }])
+    setFront('')
+    setBack('')
+    setNote('')
+    if (!keepBase) setBase('')
+    setFlash(true)
+    setTimeout(() => setFlash(false), 1200)
+  }
+
+  const submitBulk = () => {
+    if (!parsed.length) return
+    onAdd(
+      parsed.map((p) => ({
+        ...p,
+        kind: bulkKind,
+        base: bulkKind === 'conjugation' ? bulkBase : undefined,
+      })),
+    )
+    setBulkFlash(parsed.length)
+    setBulkText('')
+    setTimeout(() => setBulkFlash(0), 2500)
+  }
+
+  return (
+    <div className="mx-auto flex max-w-lg flex-col gap-8">
+      <div>
+        <h2 className="mb-1 text-xl font-semibold">Add a card</h2>
+        <p className="mb-5 text-sm text-stone-500">
+          Words and their conjugations are <strong>separate cards</strong> with independent
+          fluency levels. New cards join your reviews gradually, at your daily quota.
+        </p>
+
+        <div className="flex flex-col gap-4 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
+          <div className="grid gap-1.5">
+            <Label htmlFor="kind">Card type</Label>
+            <Select value={kind} onValueChange={(v) => setKind(v as CardKind)}>
+              <SelectTrigger id="kind">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="word">Word (lemma)</SelectItem>
+                <SelectItem value="conjugation">Conjugation / inflected form</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="front">Front — the form to recall</Label>
+            <Input
+              id="front"
+              placeholder={kind === 'conjugation' ? 'e.g. говорим' : 'e.g. говорить'}
+              value={front}
+              onChange={(e) => setFront(e.target.value)}
+            />
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="back">Back — meaning + grammar tag</Label>
+            <Input
+              id="back"
+              placeholder={
+                kind === 'conjugation' ? 'e.g. we speak (1st pl. pres.)' : 'e.g. to speak'
+              }
+              value={back}
+              onChange={(e) => setBack(e.target.value)}
+            />
+          </div>
+
+          {kind === 'conjugation' && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="base">Base word (lemma)</Label>
+              <Input
+                id="base"
+                placeholder="e.g. говорить"
+                value={base}
+                onChange={(e) => setBase(e.target.value)}
+              />
+              <p className="text-xs text-stone-400">
+                Conjugations sharing a base are grouped in the library, but still leveled
+                separately.
+              </p>
+            </div>
+          )}
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="note">Note (optional)</Label>
+            <Textarea
+              id="note"
+              rows={2}
+              placeholder="mnemonic, example sentence…"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          </div>
+
+          <div className="flex items-center gap-2 pt-1">
+            <Button onClick={() => submit(false)} disabled={!front.trim() || !back.trim()}>
+              <Plus className="mr-1 h-4 w-4" /> Add card
+            </Button>
+            {kind === 'conjugation' && (
+              <Button
+                variant="outline"
+                onClick={() => submit(true)}
+                disabled={!front.trim() || !back.trim()}
+                title="Add and keep the same base word for the next conjugation"
+              >
+                Add & keep base
+              </Button>
+            )}
+            {flash && <span className="text-sm text-emerald-600">Added ✓</span>}
+          </div>
+
+          {verbHit && (
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3">
+              <div className="text-sm">
+                <span className="font-medium">{verbHit[0]}</span>{' '}
+                <span className="text-stone-500">({verbHit[1]})</span> is in the verb table —
+                generate its 9 conjugation cards?
+              </div>
+              <Button size="sm" variant="outline" onClick={addParadigm}>
+                <Layers className="mr-1 h-3.5 w-3.5" /> +9 cards
+              </Button>
+            </div>
+          )}
+          {paradigmFlash && (
+            <p className="text-sm text-emerald-600">
+              9 conjugations of {paradigmFlash} queued ✓ (duplicates skipped)
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div>
+        <h2 className="mb-1 flex items-center gap-2 text-xl font-semibold">
+          <Import className="h-5 w-5 text-emerald-700" /> Bulk import
+        </h2>
+        <p className="mb-4 text-sm text-stone-500">
+          Fluency takes thousands of words — paste a whole list, one card per line:
+          <code className="mx-1 rounded bg-stone-100 px-1 text-xs">слово — word</code>
+          (tab, dash, semicolon or comma all work as separators).
+        </p>
+
+        <div className="flex flex-col gap-4 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
+          <Textarea
+            rows={7}
+            placeholder={'машина — car\nсобака — dog\nкрасивый — beautiful\n…'}
+            value={bulkText}
+            onChange={(e) => setBulkText(e.target.value)}
+            className="font-mono text-sm"
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={bulkKind} onValueChange={(v) => setBulkKind(v as CardKind)}>
+              <SelectTrigger className="w-44">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="word">All words</SelectItem>
+                <SelectItem value="conjugation">All conjugations</SelectItem>
+              </SelectContent>
+            </Select>
+            {bulkKind === 'conjugation' && (
+              <Input
+                className="w-40"
+                placeholder="base word"
+                value={bulkBase}
+                onChange={(e) => setBulkBase(e.target.value)}
+              />
+            )}
+            <Button onClick={submitBulk} disabled={!parsed.length} className="ml-auto">
+              Import {parsed.length > 0 ? parsed.length : ''} card{parsed.length === 1 ? '' : 's'}
+            </Button>
+          </div>
+          {bulkFlash > 0 && (
+            <p className="text-sm text-emerald-600">
+              Imported {bulkFlash} cards ✓ — they'll enter reviews at your daily new-card quota.
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Library ────────────────────────────────────────────────────────────────
+
+function LibraryView({
+  cards,
+  now,
+  onDelete,
+}: {
+  cards: Card[]
+  now: number
+  onDelete: (id: string) => void
+}) {
+  const [q, setQ] = useState('')
+  const [kindFilter, setKindFilter] = useState<'all' | CardKind>('all')
+  const [showAll, setShowAll] = useState(false)
+
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    return cards
+      .filter((c) => kindFilter === 'all' || c.kind === kindFilter)
+      .filter(
+        (c) =>
+          !needle ||
+          c.front.toLowerCase().includes(needle) ||
+          c.back.toLowerCase().includes(needle) ||
+          (c.base ?? '').toLowerCase().includes(needle),
+      )
+      .sort(
+        (a, b) =>
+          (a.base ?? a.front).localeCompare(b.base ?? b.front, 'ru') ||
+          a.front.localeCompare(b.front, 'ru'),
+      )
+  }, [cards, q, kindFilter])
+
+  const visible = showAll ? filtered : filtered.slice(0, 200)
+
+  const counts = useMemo(() => {
+    const m: Record<CardKind, number> = { word: 0, conjugation: 0 }
+    for (const c of cards) m[c.kind]++
+    return m
+  }, [cards])
+
+  const groups = useMemo(() => wordGroups(cards), [cards])
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-48 flex-1">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-stone-400" />
+          <Input
+            className="pl-8"
+            placeholder="Search cards or base words…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+        </div>
+        <Select value={kindFilter} onValueChange={(v) => setKindFilter(v as typeof kindFilter)}>
+          <SelectTrigger className="w-44">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All ({cards.length})</SelectItem>
+            <SelectItem value="word">Words ({counts.word})</SelectItem>
+            <SelectItem value="conjugation">Conjugations ({counts.conjugation})</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
+        {visible.length === 0 ? (
+          <p className="p-8 text-center text-sm text-stone-400">No cards match.</p>
+        ) : (
+          visible.map((c, i) => (
+            <div
+              key={c.id}
+              className={`flex items-center gap-3 px-4 py-3 ${i > 0 ? 'border-t border-stone-100' : ''}`}
+            >
+              <span
+                className={`w-24 shrink-0 rounded-full border px-2 py-0.5 text-center text-[11px] font-medium ${KIND_STYLES[c.kind]}`}
+              >
+                {c.kind}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium">
+                  {c.front}
+                  {c.base && c.kind === 'conjugation' && (
+                    <span className="ml-2 text-xs font-normal text-stone-400">← {c.base}</span>
+                  )}
+                </div>
+                <div className="truncate text-sm text-stone-500">{c.back}</div>
+              </div>
+              <div className="hidden w-36 shrink-0 text-right sm:block">
+                {(() => {
+                  const group = groups.get(c.base ?? c.front)
+                  const isGroupBase = c.kind === 'word' && group && group.length > 1
+                  if (isGroupBase) {
+                    const mastery = groupMastery(group)
+                    const introducedForms = group.filter((g) => g.introduced).length
+                    return (
+                      <>
+                        <LevelPill level={Math.round(mastery)} />
+                        <div className="mt-0.5 text-[10px] text-stone-400">
+                          word mastery · {introducedForms}/{group.length} forms
+                        </div>
+                      </>
+                    )
+                  }
+                  return c.introduced ? (
+                    <>
+                      <LevelPill level={c.level} />
+                      <div
+                        className={`mt-0.5 text-[11px] tabular-nums ${c.due <= now ? 'text-emerald-600' : 'text-stone-400'}`}
+                      >
+                        {formatDue(c.due, now)}
+                      </div>
+                    </>
+                  ) : (
+                    <span className="text-[11px] text-stone-400">in new backlog</span>
+                  )
+                })()}
+              </div>
+              <button
+                onClick={() => onDelete(c.id)}
+                className="shrink-0 rounded p-1.5 text-stone-300 transition-colors hover:bg-red-50 hover:text-red-500"
+                title="Delete card"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+      <div className="flex items-center justify-between text-xs text-stone-400">
+        <span>
+          {filtered.length} of {cards.length} cards
+          {!showAll && filtered.length > 200 && ' (showing first 200)'}
+        </span>
+        {!showAll && filtered.length > 200 && (
+          <button className="text-emerald-700 hover:underline" onClick={() => setShowAll(true)}>
+            Show all
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Progress ───────────────────────────────────────────────────────────────
+
+function ProgressView({
+  state,
+  now,
+  streak,
+  reviewsToday,
+  introducedToday,
+  onSetNewPerDay,
+  onReset,
+}: {
+  state: AppState
+  now: number
+  streak: number
+  reviewsToday: number
+  introducedToday: number
+  onSetNewPerDay: (n: number) => void
+  onReset: () => void
+}) {
+  const { cards } = state
+  const fluency = fluencyPercent(cards)
+  const introduced = cards.filter((c) => c.introduced)
+  const backlog = cards.length - introduced.length
+  const dueNow = dueCards(cards, now).length
+
+  const groups = useMemo(() => wordGroups(cards), [cards])
+  const fluentWords = useMemo(() => {
+    let n = 0
+    for (const g of groups.values()) if (groupMastery(g) >= FLUENT_LEVEL) n++
+    return n
+  }, [groups])
+
+  // distribution of WORD mastery (rounded) — conjugations roll up into their word
+  const dist = useMemo(() => {
+    const d = new Array(FLUENT_LEVEL + 1).fill(0) as number[]
+    for (const g of groups.values()) {
+      if (g.some((c) => c.introduced)) d[Math.round(groupMastery(g))]++
+    }
+    return d
+  }, [groups])
+  const maxDist = Math.max(1, ...dist)
+
+  const days = useMemo(() => {
+    const out: Array<{ label: string; count: number }> = []
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date(now)
+      d.setDate(d.getDate() - i)
+      out.push({
+        label: `${d.getMonth() + 1}/${d.getDate()}`,
+        count: state.history[todayKey(d.getTime())] ?? 0,
+      })
+    }
+    return out
+  }, [state.history, now])
+  const maxDay = Math.max(1, ...days.map((d) => d.count))
+
+  const stat = (label: string, value: string, sub?: string) => (
+    <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
+      <div className="text-xs uppercase tracking-wide text-stone-400">{label}</div>
+      <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
+      {sub && <div className="mt-0.5 text-xs text-stone-500">{sub}</div>}
+    </div>
+  )
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div>
+        <div className="mb-1 flex items-end justify-between">
+          <h2 className="text-xl font-semibold">Path to fluency</h2>
+          <span className="text-3xl font-bold text-emerald-700 tabular-nums">{fluency}%</span>
+        </div>
+        <Progress value={fluency} className="h-3" />
+        <p className="mt-1 text-xs text-stone-400">
+          Average mastery of your {groups.size} words — every conjugation counts toward its word,
+          not separately. {backlog} cards still waiting in the new backlog.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {stat('Words', `${groups.size}`, `${fluentWords} fluent`)}
+        {stat('Cards', `${cards.length}`, `${introduced.length} in circulation`)}
+        {stat('Due now', `${dueNow}`, `${reviewsToday} reviewed today`)}
+        {stat('Streak', `${streak}d`)}
+      </div>
+
+      <div className="flex items-center justify-between rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
+        <div>
+          <div className="text-sm font-medium">New cards per day</div>
+          <div className="text-xs text-stone-500">
+            {introducedToday} of {state.newPerDay} introduced today · thousands of words are
+            digestible only a few at a time
+          </div>
+        </div>
+        <Select
+          value={`${state.newPerDay}`}
+          onValueChange={(v) => onSetNewPerDay(parseInt(v, 10))}
+        >
+          <SelectTrigger className="w-24">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {[5, 10, 15, 20, 30, 50].map((n) => (
+              <SelectItem key={n} value={`${n}`}>
+                {n}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
+        <h3 className="mb-3 text-sm font-medium">Words by mastery level</h3>
+        <div className="flex flex-col gap-1.5">
+          {dist.map((n, lvl) => (
+            <div key={lvl} className="flex items-center gap-2 text-xs">
+              <span className="w-20 shrink-0 text-stone-500">
+                L{lvl} {LEVEL_NAMES[lvl]}
+              </span>
+              <div className="h-4 flex-1 overflow-hidden rounded bg-stone-100">
+                <div
+                  className={`h-full rounded ${lvl >= FLUENT_LEVEL ? 'bg-emerald-600' : 'bg-emerald-300'}`}
+                  style={{ width: `${(n / maxDist) * 100}%` }}
+                />
+              </div>
+              <span className="w-8 text-right tabular-nums text-stone-500">{n}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
+        <h3 className="mb-3 text-sm font-medium">Reviews, last 14 days</h3>
+        <div className="flex h-24 items-end gap-1">
+          {days.map((d, i) => (
+            <div key={i} className="flex flex-1 flex-col items-center gap-1">
+              <div
+                className="w-full rounded-t bg-emerald-400"
+                style={{ height: `${Math.max(d.count ? 8 : 2, (d.count / maxDay) * 100)}%` }}
+                title={`${d.label}: ${d.count} reviews`}
+              />
+              {i % 2 === 0 && (
+                <span className="text-[9px] tabular-nums text-stone-400">{d.label}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex justify-end">
+        <Button variant="ghost" size="sm" className="text-stone-400" onClick={onReset}>
+          <RotateCcw className="mr-1 h-3.5 w-3.5" /> Reset demo data
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Account picker ─────────────────────────────────────────────────────────
+
+function AccountScreen({
+  onPick,
+  onDemo,
+  onBack,
+}: {
+  onPick: (name: string) => void
+  onDemo: () => void
+  onBack?: () => void
+}) {
+  const [accounts, setAccounts] = useState<Account[]>(() => listAccounts())
+  const [name, setName] = useState('')
+
+  const summaries = useMemo(
+    () =>
+      accounts.map((a) => {
+        const s = loadState(a.name)
+        return {
+          account: a,
+          fluency: fluencyPercent(s.cards),
+          studied: s.cards.filter((c) => c.introduced).length,
+          total: s.cards.length,
+          streak: streakDays(s.history),
+        }
+      }),
+    [accounts],
+  )
+
+  const create = () => {
+    const n = name.trim()
+    if (!n) return
+    createAccount(n)
+    onPick(n)
+  }
+
+  const remove = (n: string) => {
+    deleteAccount(n)
+    setAccounts(listAccounts())
+  }
+
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center bg-stone-50 px-4 text-stone-900">
+      <div className="w-full max-w-md">
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="mb-4 text-sm text-stone-500 hover:text-emerald-700"
+          >
+            ← Back to the app
+          </button>
+        )}
+        <div className="mb-6 flex flex-col items-center gap-2 text-center">
+          <GraduationCap className="h-10 w-10 text-emerald-700" />
+          <h1 className="text-2xl font-semibold tracking-tight">SRS Fluency</h1>
+          <p className="text-sm text-stone-500">русский · 0 → fluent — who's studying?</p>
+        </div>
+
+        <div className="flex flex-col gap-3 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
+          {summaries.length > 0 && (
+            <div className="flex flex-col gap-2">
+              {summaries.map(({ account, fluency, studied, total, streak }) => (
+                <div
+                  key={account.name}
+                  className="flex items-center gap-3 rounded-xl border border-stone-200 px-4 py-3 transition-colors hover:border-emerald-400"
+                >
+                  <button onClick={() => onPick(account.name)} className="min-w-0 flex-1 text-left">
+                    <div className="flex items-center gap-2">
+                      <UserRound className="h-4 w-4 shrink-0 text-emerald-700" />
+                      <span className="truncate font-medium">{account.name}</span>
+                    </div>
+                    <div className="mt-0.5 text-xs text-stone-500 tabular-nums">
+                      {fluency}% fluent · {studied}/{total} cards in play
+                      {streak > 0 && (
+                        <span className="ml-1 text-orange-600">· 🔥 {streak}d</span>
+                      )}
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => remove(account.name)}
+                    className="shrink-0 rounded p-1.5 text-stone-300 transition-colors hover:bg-red-50 hover:text-red-500"
+                    title={`Delete account ${account.name}`}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <Input
+              placeholder="New account name…"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && create()}
+            />
+            <Button onClick={create} disabled={!name.trim()}>
+              <UserRoundPlus className="mr-1 h-4 w-4" /> Create
+            </Button>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="h-px flex-1 bg-stone-200" />
+            <span className="text-xs text-stone-400">or</span>
+            <div className="h-px flex-1 bg-stone-200" />
+          </div>
+
+          <Button variant="outline" onClick={onDemo} className="w-full">
+            <Eye className="mr-1.5 h-4 w-4" /> Try it first — 20-word demo, no account needed
+          </Button>
+
+          <p className="text-center text-xs text-stone-400">
+            Profiles and progress are saved locally in this browser — each account gets its own
+            deck, levels and streak.
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}

@@ -1,0 +1,40 @@
+# SRS Fluency — Telegram bot
+
+The same Russian SRS engine as the web app, delivered as a Telegram bot.
+Zero npm dependencies (Node 20+ fetch only). Each Telegram chat is its own
+account — deck, levels, streak and quota are stored per chat in `bot/data/`.
+
+## Setup
+
+1. In Telegram, open **@BotFather** → `/newbot` → follow the prompts → copy the token.
+2. Run the bot:
+
+```bash
+cd /Users/seamus/srs-fluency
+TELEGRAM_BOT_TOKEN=123456:ABC-your-token node bot/bot.mjs
+```
+
+3. Open your bot in Telegram and send `/start`.
+
+Keep it running with any process manager, e.g.:
+
+```bash
+TELEGRAM_BOT_TOKEN=... npx pm2 start bot/bot.mjs --name srs-fluency
+```
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `/start`, `/study` | Start / continue reviewing (due cards first, then today's new-word quota) |
+| `/stats` | Fluency %, word count, due cards, streak |
+| `/quota 30` | Set new words per day (1–200, default 20) |
+| `/help` | Command list |
+
+## How reviewing works
+
+The bot sends the Russian word → you tap **👁 Reveal** → grade yourself
+**✓ Right (+1 level)** or **✗ Wrong (−1 level, back in 10 min)** — the same
+scoring as the web app. Conjugations are separate cards for scheduling but
+roll up into their word's mastery. Deck: 8,000 frequency-ordered words +
+full paradigms for the top 300 verbs (~10,700 cards).
