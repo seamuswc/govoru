@@ -62,6 +62,45 @@ function sessionEmail(auth, req) {
   return s && s.exp > Date.now() ? s.email : null
 }
 
+function resetEmailHtml(link) {
+  return `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f5f5f4;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <div style="max-width:480px;margin:0 auto;padding:40px 16px;">
+    <div style="background:#ffffff;border:1px solid #e7e5e4;border-radius:16px;overflow:hidden;">
+      <div style="background:#047857;padding:24px 32px;">
+        <span style="color:#ffffff;font-size:20px;font-weight:700;letter-spacing:-0.3px;">🎓 Govoru</span>
+        <span style="color:#a7f3d0;font-size:13px;float:right;line-height:28px;">русский · 0 → fluent</span>
+      </div>
+      <div style="padding:32px;">
+        <h1 style="margin:0 0 8px;font-size:22px;font-weight:600;color:#1c1917;">Reset your password</h1>
+        <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#57534e;">
+          We got a request to reset the password for your Govoru account.
+          Click the button below to choose a new one:
+        </p>
+        <div style="text-align:center;margin:0 0 24px;">
+          <a href="${link}" style="display:inline-block;background:#047857;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:12px 32px;border-radius:10px;">Choose a new password</a>
+        </div>
+        <p style="margin:0 0 16px;font-size:13px;line-height:1.6;color:#78716c;">
+          This link works for <strong>1 hour</strong>. If the button doesn't work, paste this into your browser:
+        </p>
+        <p style="margin:0 0 16px;font-size:12px;line-height:1.5;word-break:break-all;color:#047857;background:#ecfdf5;border:1px solid #d1fae5;border-radius:8px;padding:10px 12px;">
+          ${link}
+        </p>
+        <p style="margin:0;font-size:13px;line-height:1.6;color:#a8a29e;">
+          Didn't ask for this? You can safely ignore this email — your password stays the same.
+        </p>
+      </div>
+    </div>
+    <p style="text-align:center;font-size:11px;color:#a8a29e;margin:16px 0 0;">
+      Govoru — Russian vocabulary trainer · govoru.xyz
+    </p>
+  </div>
+</body>
+</html>`
+}
+
 async function sendResetEmail(email, link) {
   const r = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -70,7 +109,8 @@ async function sendResetEmail(email, link) {
       from: 'Govoru <support@govoru.xyz>',
       to: [email],
       subject: 'Reset your Govoru password',
-      html: `<p>You asked to reset your Govoru password.</p><p><a href="${link}">${link}</a></p><p>This link works for 1 hour. If you didn't ask for it, ignore this email.</p>`,
+      html: resetEmailHtml(link),
+      text: `Reset your Govoru password (link valid 1 hour):\n${link}\n\nIf you didn't ask for this, ignore this email.`,
     }),
   })
   const j = await r.json().catch(() => ({}))
