@@ -474,26 +474,46 @@ function ReviewView({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
       if (!card) return
-      if (e.key === ' ' || e.key === 'Enter') {
+      const k = e.key.toLowerCase()
+
+      // f / h / p → replay pronunciation
+      if (k === 'f' || k === 'h' || k === 'p') {
         e.preventDefault()
-        if (!revealed) reveal()
+        playAudio(card.front)
+        return
       }
-      if (revealed) {
-        if (grading === 'simple') {
-          if (e.key === '1' || e.key === 'ArrowLeft') pickSimple(false)
-          if (e.key === '2' || e.key === 'ArrowRight') pickSimple(true)
-        } else {
-          if (e.key === '1') pick('again')
-          if (e.key === '2') pick('hard')
-          if (e.key === '3') pick('good')
-          if (e.key === '4') pick('easy')
+
+      // hidden card: space (or enter) reveals; other keys do nothing yet
+      if (!revealed) {
+        if (e.key === ' ' || e.key === 'Enter') {
+          e.preventDefault()
+          reveal()
         }
+        return
+      }
+
+      if (grading === 'simple') {
+        // revealed: space = correct, any other key = wrong
+        if (['Shift', 'Control', 'Alt', 'Meta', 'Tab', 'Escape', 'CapsLock'].includes(e.key)) return
+        if (e.key.startsWith('F') && e.key.length > 1) return // F1–F12
+        e.preventDefault()
+        if (e.key === ' ') pickSimple(true)
+        else pickSimple(false)
+      } else {
+        if (e.key === '1') pick('again')
+        if (e.key === '2') pick('hard')
+        if (e.key === '3' || e.key === ' ') {
+          e.preventDefault()
+          pick('good')
+        }
+        if (e.key === '4') pick('easy')
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [card, revealed, pick, pickSimple, grading, reveal])
+  }, [card, revealed, pick, pickSimple, grading, reveal, playAudio])
 
   if (!card) {
     const next = nextDue(cards, now)
@@ -587,7 +607,7 @@ function ReviewView({
             </div>
           ) : (
             <div className="mt-6 flex items-center justify-center gap-1 text-sm text-stone-400">
-              <Eye className="h-4 w-4" /> tap or press space to reveal
+              <Eye className="h-4 w-4" /> tap or press space to reveal · f/h/p to listen
             </div>
           )}
         </button>
@@ -604,7 +624,7 @@ function ReviewView({
                 −1 level · back in 10m
               </span>
               <kbd className="mt-1 hidden rounded bg-white/60 px-1 text-[10px] text-stone-400 sm:inline">
-                1
+                any key
               </kbd>
             </button>
             <button
@@ -618,7 +638,7 @@ function ReviewView({
                 {formatInterval(intervalForLevel(Math.min(FLUENT_LEVEL, card.level + 1)))}
               </span>
               <kbd className="mt-1 hidden rounded bg-white/60 px-1 text-[10px] text-stone-400 sm:inline">
-                2
+                space
               </kbd>
             </button>
           </div>
