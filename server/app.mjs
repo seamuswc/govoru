@@ -95,7 +95,7 @@ const readBody = (req) =>
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 async function handleApi(req, res, path) {
-  const body = req.method === 'POST' ? await readBody(req) : {}
+  const body = req.method === 'POST' || req.method === 'PUT' ? await readBody(req) : {}
   const auth = await loadAuth()
 
   if (path === '/api/register' && req.method === 'POST') {
