@@ -458,13 +458,26 @@ function ReviewView({
     [card, revealed, onSimple],
   )
 
+  const playAudio = useCallback((text: string) => {
+    const a = new Audio(`/api/tts?text=${encodeURIComponent(text)}`)
+    a.play().catch(() => {})
+  }, [])
+
+  // reveal + auto-play pronunciation (called from click/key handlers so the
+  // browser counts it as a user gesture and allows audio)
+  const reveal = useCallback(() => {
+    if (revealed || !card) return
+    setRevealed(true)
+    playAudio(card.front)
+  }, [revealed, card, playAudio])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
       if (!card) return
       if (e.key === ' ' || e.key === 'Enter') {
         e.preventDefault()
-        if (!revealed) setRevealed(true)
+        if (!revealed) reveal()
       }
       if (revealed) {
         if (grading === 'simple') {
@@ -480,7 +493,7 @@ function ReviewView({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [card, revealed, pick, pickSimple, grading])
+  }, [card, revealed, pick, pickSimple, grading, reveal])
 
   if (!card) {
     const next = nextDue(cards, now)
@@ -507,11 +520,6 @@ function ReviewView({
   }
 
   const preview = gradePreview(card)
-
-  const playAudio = useCallback((text: string) => {
-    const a = new Audio(`/api/tts?text=${encodeURIComponent(text)}`)
-    a.play().catch(() => {})
-  }, [])
 
   return (
     <div className="flex flex-col gap-4">
@@ -568,7 +576,7 @@ function ReviewView({
         </div>
 
         <button
-          onClick={() => setRevealed(true)}
+          onClick={() => reveal()}
           className="block w-full cursor-pointer px-6 py-12 text-center"
         >
           <div className="text-4xl font-semibold tracking-tight">{card.front}</div>
