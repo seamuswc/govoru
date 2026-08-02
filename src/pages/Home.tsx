@@ -28,6 +28,7 @@ import {
   Trash2,
   UserRound,
   UserRoundPlus,
+  Volume2,
 } from 'lucide-react'
 import {
   type AppState,
@@ -507,6 +508,11 @@ function ReviewView({
 
   const preview = gradePreview(card)
 
+  const playAudio = useCallback((text: string) => {
+    const a = new Audio(`/api/tts?text=${encodeURIComponent(text)}`)
+    a.play().catch(() => {})
+  }, [])
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between text-sm text-stone-500">
@@ -549,7 +555,14 @@ function ReviewView({
               <Layers className="h-3 w-3" /> of <em className="font-medium">{card.base}</em>
             </span>
           )}
-          <span className="ml-auto">
+          <span className="ml-auto flex items-center gap-2">
+            <button
+              onClick={() => playAudio(card.front)}
+              className="rounded-full p-1.5 text-stone-400 transition-colors hover:bg-emerald-50 hover:text-emerald-700"
+              title="Listen to pronunciation"
+            >
+              <Volume2 className="h-4 w-4" />
+            </button>
             <LevelPill level={card.level} />
           </span>
         </div>

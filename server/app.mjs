@@ -7,12 +7,20 @@ import { existsSync } from 'node:fs'
 import { join, extname, normalize, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { scryptSync, randomBytes, timingSafeEqual, createHash } from 'node:crypto'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { createReadStream } from 'node:fs'
+
+const execFileAsync = promisify(execFile)
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(HERE, '..', 'dist')
 const DATA = join(HERE, 'data')
 const STATES = join(DATA, 'states')
 const AUTH_FILE = join(DATA, 'auth.json')
+const TTS_DIR = join(DATA, 'tts')
+const TTS_PYTHON = process.env.TTS_PYTHON ?? '/opt/govoru/venv/bin/python'
+const TTS_VOICE = process.env.TTS_VOICE ?? 'ru-RU-SvetlanaNeural'
 const PORT = parseInt(process.env.PORT ?? '80', 10)
 const RESEND_API_KEY = process.env.RESEND_API_KEY ?? ''
 
@@ -187,6 +195,31 @@ async function handleApi(req, res, path) {
     await mkdir(STATES, { recursive: true })
     await writeFile(stateFile(email), JSON.stringify(body.state))
     return json(res, 200, { ok: true })
+  }
+
+  if (path === '/api/tts' && req.method === 'GET') {
+    const url = new URL(req.url, 'http://x')
+    const text = (url.searchParams.get('text') ?? '').trim().slice(0, 120)
+    if (!text) return json(res, 400, { error: 'No text' })
+    const file = join(TTS_DIR, createHash('sha1').update(text).digest('hex') + '.mp3')
+    if (!existsSync(file)) {
+      await mkdir(TTS_DIR, { recursive: true })
+      try {
+        await execFileAsync(
+          TTS_PYTHON,
+          ['-m', 'edge_tts', '--voice', TTS_VOICE, '--text', text, '--write-media', file],
+          { timeout: 30_000 },
+        )
+      } catch (e) {
+        console.error('tts failed:', e.message)
+        return json(res, 502, { error: 'TTS failed' })
+      }
+    }
+    res.writeHead(200, {
+      'content-type': 'audio/mpeg',
+      'cache-control': 'public, max-age=31536000, immutable',
+    })
+    return createReadStream(file).pipe(res)
   }
 
   return json(res, 404, { error: 'Not found' })

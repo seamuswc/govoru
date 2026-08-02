@@ -33,10 +33,25 @@ function extractArray(file, name) {
 }
 
 let seedRows = null
+// ultra-basic function words excluded from the bot deck — users want useful
+// vocabulary, not "yes / no / and / I / you" filler
+const BOT_STOPLIST = new Set([
+  'и', 'в', 'не', 'на', 'я', 'что', 'он', 'с', 'она', 'ты', 'мы', 'вы', 'они', 'оно',
+  'это', 'но', 'а', 'или', 'да', 'нет', 'как', 'у', 'о', 'об', 'к', 'ко', 'за', 'по',
+  'из', 'от', 'до', 'же', 'бы', 'ли', 'так', 'тут', 'там', 'ну', 'уже', 'ещё',
+  'только', 'очень', 'где', 'когда', 'кто', 'почему', 'зачем', 'сколько', 'который',
+  'свой', 'мой', 'твой', 'его', 'её', 'их', 'наш', 'ваш', 'этот', 'тот', 'всё', 'все',
+  'то', 'для', 'при', 'над', 'под', 'про', 'без', 'через', 'между', 'перед', 'после',
+])
+
+export const BOT_DECK_VERSION = 2 // bump → existing bot users reseed
+
 function deckRows() {
   if (seedRows) return seedRows
   const words = extractArray('ruDeck.ts', 'RU_WORDS')
-  const conjs = extractArray('ruDeck.ts', 'RU_CONJUGATIONS')
+    .filter((w) => !BOT_STOPLIST.has(w.f))
+    .slice(0, 1000)
+  const conjs = extractArray('ruDeck.ts', 'RU_CONJUGATIONS').slice(0, 540) // top 60 verbs
   const rows = []
   let ci = 0
   words.forEach((w, i) => {
@@ -61,11 +76,13 @@ export function loadUser(chatId) {
   if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true })
   try {
     const s = JSON.parse(readFileSync(statePath(chatId), 'utf8'))
-    if (Array.isArray(s.cards)) return s
+    // reseed when the deck definition changes (new word list / filters)
+    if (Array.isArray(s.cards) && s.deckVersion === BOT_DECK_VERSION) return s
   } catch { /* first run or corrupt → seed */ }
   const now = Date.now()
   const rows = deckRows()
   const s = {
+    deckVersion: BOT_DECK_VERSION,
     cards: rows.map((r, i) => ({
       id: `s${i}`,
       front: r.f,
