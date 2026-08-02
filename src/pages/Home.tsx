@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
@@ -30,28 +30,23 @@ import {
   UserRoundPlus,
 } from 'lucide-react'
 import {
-  type Account,
   type AppState,
   type Card,
   type CardKind,
   FLUENT_LEVEL,
   type Grade,
   LEVEL_NAMES,
-  createAccount,
-  deleteAccount,
   demoState,
   dueCards,
   findVerb,
   fluencyPercent,
   formatDue,
   formatInterval,
-  getCurrentAccount,
   gradeCard,
   gradePreview,
   gradeSimple,
   groupMastery,
   intervalForLevel,
-  listAccounts,
   loadState,
   makeCard,
   newCards,
@@ -59,12 +54,23 @@ import {
   parseBulk,
   resetState,
   saveState,
-  setCurrentAccount,
   streakDays,
   todayKey,
   verbConjugationCards,
   wordGroups,
 } from '@/lib/srs'
+import {
+  apiForgot,
+  apiGetState,
+  apiLogin,
+  apiLogout,
+  apiPutState,
+  apiRegister,
+  apiReset,
+  loadAuth,
+  saveAuth,
+  type Auth,
+} from '@/lib/api'
 
 type Tab = 'review' | 'add' | 'library' | 'progress'
 
@@ -95,41 +101,54 @@ function LevelPill({ level }: { level: number }) {
 }
 
 export default function Home() {
-  const [account, setAccount] = useState<string | null>(() => getCurrentAccount())
-  const [demo, setDemo] = useState(false)
-  const [showAccounts, setShowAccounts] = useState(false)
+  const [auth, setAuth] = useState<Auth | null>(() => loadAuth())
+  const [showAuth, setShowAuth] = useState(false)
+  const [resetToken, setResetToken] = useState<string | null>(() =>
+    window.location.hash.startsWith('#reset=') ? window.location.hash.slice(7) : null,
+  )
 
-  // account screen is an overlay — the normal app view is the default
-  if (showAccounts) {
+  if (resetToken) {
     return (
-      <AccountScreen
-        onPick={(name) => {
-          setCurrentAccount(name)
-          setAccount(name)
-          setDemo(false)
-          setShowAccounts(false)
+      <ResetScreen
+        token={resetToken}
+        onDone={() => {
+          history.replaceState(null, '', window.location.pathname)
+          setResetToken(null)
+          setShowAuth(true)
         }}
-        onDemo={() => {
-          setCurrentAccount(null)
-          setAccount(null)
-          setDemo(true)
-          setShowAccounts(false)
-        }}
-        onBack={() => setShowAccounts(false)}
       />
     )
   }
 
-  // signed-out visitors get demo mode by default (20 fixed words, unsaved);
-  // signing in unlocks the full deck with saved progress
-  const isDemo = demo || !account
+  if (showAuth) {
+    return (
+      <AuthScreen
+        auth={auth}
+        onAuth={(a) => {
+          saveAuth(a)
+          setAuth(a)
+          setShowAuth(false)
+        }}
+        onLogout={() => {
+          if (auth) apiLogout(auth.token)
+          saveAuth(null)
+          setAuth(null)
+        }}
+        onBack={() => setShowAuth(false)}
+      />
+    )
+  }
+
+  // signed-out visitors get demo mode (20 fixed words, unsaved);
+  // signing in unlocks the full deck with server-synced progress
   return (
     <StudyApp
-      key={isDemo ? 'demo' : (account ?? 'demo')} // remount when the profile changes
-      account={isDemo ? 'Demo' : (account ?? 'Demo')}
-      displayAccount={account}
-      demo={isDemo}
-      onOpenAccounts={() => setShowAccounts(true)}
+      key={auth ? auth.email : 'demo'} // remount when the account changes
+      account={auth ? auth.email : 'Demo'}
+      displayAccount={auth?.email ?? null}
+      demo={!auth}
+      auth={auth}
+      onOpenAccounts={() => setShowAuth(true)}
     />
   )
 }
@@ -138,11 +157,13 @@ function StudyApp({
   account,
   displayAccount,
   demo = false,
+  auth,
   onOpenAccounts,
 }: {
   account: string
   displayAccount: string | null
   demo?: boolean
+  auth: Auth | null
   onOpenAccounts: () => void
 }) {
   const [state, setState] = useState<AppState>(() => (demo ? demoState() : loadState(account)))
@@ -151,8 +172,33 @@ function StudyApp({
   const [sessionCount, setSessionCount] = useState(0)
 
   useEffect(() => {
-    if (!demo) saveState(state, account) // demo progress is never saved
+    if (!demo) saveState(state, account) // demo progress is never saved locally
   }, [state, account, demo])
+
+  // pull progress from the server once on sign-in (server wins; if the server
+  // has nothing yet, push the local state up)
+  const syncedRef = useRef(false)
+  useEffect(() => {
+    if (!auth || syncedRef.current) return
+    syncedRef.current = true
+    apiGetState(auth.token)
+      .then((remote) => {
+        if (remote && Array.isArray(remote.cards) && remote.cards.length) {
+          setState(remote)
+        } else {
+          apiPutState(auth.token, loadState(account)).catch(() => {})
+        }
+      })
+      .catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // push progress to the server (debounced)
+  useEffect(() => {
+    if (!auth) return
+    const t = setTimeout(() => apiPutState(auth.token, state).catch(() => {}), 1500)
+    return () => clearTimeout(t)
+  }, [state, auth])
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 15_000)
     return () => clearInterval(t)
@@ -1125,122 +1171,191 @@ function ProgressView({
   )
 }
 
-// ─── Account picker ─────────────────────────────────────────────────────────
 
-function AccountScreen({
-  onPick,
-  onDemo,
+// ─── Auth screens (email + password, server-backed) ─────────────────────────
+
+function AuthScreen({
+  auth,
+  onAuth,
+  onLogout,
   onBack,
 }: {
-  onPick: (name: string) => void
-  onDemo: () => void
-  onBack?: () => void
+  auth: Auth | null
+  onAuth: (a: Auth) => void
+  onLogout: () => void
+  onBack: () => void
 }) {
-  const [accounts, setAccounts] = useState<Account[]>(() => listAccounts())
-  const [name, setName] = useState('')
+  const [mode, setMode] = useState<'login' | 'register' | 'forgot'>('login')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [busy, setBusy] = useState(false)
 
-  const summaries = useMemo(
-    () =>
-      accounts.map((a) => {
-        const s = loadState(a.name)
-        return {
-          account: a,
-          fluency: fluencyPercent(s.cards),
-          studied: s.cards.filter((c) => c.introduced).length,
-          total: s.cards.length,
-          streak: streakDays(s.history),
-        }
-      }),
-    [accounts],
-  )
-
-  const create = () => {
-    const n = name.trim()
-    if (!n) return
-    createAccount(n)
-    onPick(n)
-  }
-
-  const remove = (n: string) => {
-    deleteAccount(n)
-    setAccounts(listAccounts())
+  const submit = async () => {
+    setError('')
+    setNotice('')
+    setBusy(true)
+    try {
+      if (mode === 'forgot') {
+        await apiForgot(email)
+        setNotice('If that email has an account, a reset link is on its way. Check your inbox.')
+      } else {
+        const a = mode === 'login' ? await apiLogin(email, password) : await apiRegister(email, password)
+        onAuth(a)
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Something went wrong')
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-stone-50 px-4 text-stone-900">
       <div className="w-full max-w-md">
-        {onBack && (
-          <button
-            onClick={onBack}
-            className="mb-4 text-sm text-stone-500 hover:text-emerald-700"
-          >
-            ← Back to the app
-          </button>
-        )}
+        <button onClick={onBack} className="mb-4 text-sm text-stone-500 hover:text-emerald-700">
+          ← Back to the app
+        </button>
         <div className="mb-6 flex flex-col items-center gap-2 text-center">
           <GraduationCap className="h-10 w-10 text-emerald-700" />
           <h1 className="text-2xl font-semibold tracking-tight">SRS Fluency</h1>
-          <p className="text-sm text-stone-500">русский · 0 → fluent — who's studying?</p>
+          <p className="text-sm text-stone-500">русский · 0 → fluent</p>
         </div>
 
-        <div className="flex flex-col gap-3 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
-          {summaries.length > 0 && (
-            <div className="flex flex-col gap-2">
-              {summaries.map(({ account, fluency, studied, total, streak }) => (
-                <div
-                  key={account.name}
-                  className="flex items-center gap-3 rounded-xl border border-stone-200 px-4 py-3 transition-colors hover:border-emerald-400"
-                >
-                  <button onClick={() => onPick(account.name)} className="min-w-0 flex-1 text-left">
-                    <div className="flex items-center gap-2">
-                      <UserRound className="h-4 w-4 shrink-0 text-emerald-700" />
-                      <span className="truncate font-medium">{account.name}</span>
-                    </div>
-                    <div className="mt-0.5 text-xs text-stone-500 tabular-nums">
-                      {fluency}% fluent · {studied}/{total} cards in play
-                      {streak > 0 && (
-                        <span className="ml-1 text-orange-600">· 🔥 {streak}d</span>
-                      )}
-                    </div>
-                  </button>
+        <div className="flex flex-col gap-4 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
+          {auth ? (
+            <>
+              <div className="flex items-center gap-2 text-sm">
+                <UserRound className="h-4 w-4 text-emerald-700" />
+                Signed in as <strong className="truncate">{auth.email}</strong>
+              </div>
+              <p className="text-xs text-stone-500">
+                Your progress syncs to the server — pick up on any device.
+              </p>
+              <Button variant="outline" onClick={onLogout}>
+                Sign out
+              </Button>
+            </>
+          ) : (
+            <>
+              <div className="grid grid-cols-3 gap-1 rounded-lg bg-stone-100 p-1 text-sm">
+                {(
+                  [
+                    ['login', 'Sign in'],
+                    ['register', 'Register'],
+                    ['forgot', 'Forgot'],
+                  ] as const
+                ).map(([m, label]) => (
                   <button
-                    onClick={() => remove(account.name)}
-                    className="shrink-0 rounded p-1.5 text-stone-300 transition-colors hover:bg-red-50 hover:text-red-500"
-                    title={`Delete account ${account.name}`}
+                    key={m}
+                    onClick={() => {
+                      setMode(m)
+                      setError('')
+                      setNotice('')
+                    }}
+                    className={`rounded-md px-2 py-1.5 font-medium transition-colors ${
+                      mode === m ? 'bg-white shadow-sm' : 'text-stone-500 hover:text-stone-700'
+                    }`}
                   >
-                    <Trash2 className="h-4 w-4" />
+                    {label}
                   </button>
+                ))}
+              </div>
+
+              <div className="grid gap-1.5">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </div>
+
+              {mode !== 'forgot' && (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="password">Password</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                    placeholder="at least 6 characters"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && submit()}
+                  />
                 </div>
-              ))}
-            </div>
+              )}
+
+              {error && <p className="text-sm text-red-600">{error}</p>}
+              {notice && <p className="text-sm text-emerald-700">{notice}</p>}
+
+              <Button onClick={submit} disabled={busy || !email.trim() || (mode !== 'forgot' && !password)}>
+                {busy
+                  ? '…'
+                  : mode === 'login'
+                    ? 'Sign in'
+                    : mode === 'register'
+                      ? 'Create account'
+                      : 'Email me a reset link'}
+              </Button>
+
+              <p className="text-center text-xs text-stone-400">
+                Progress syncs to your account across devices. Signed-out visitors get the 20-word
+                demo.
+              </p>
+            </>
           )}
+        </div>
+      </div>
+    </div>
+  )
+}
 
-          <div className="flex gap-2">
+function ResetScreen({ token, onDone }: { token: string; onDone: () => void }) {
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const submit = async () => {
+    setError('')
+    setBusy(true)
+    try {
+      await apiReset(token, password)
+      onDone()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Something went wrong')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center bg-stone-50 px-4 text-stone-900">
+      <div className="w-full max-w-md">
+        <div className="mb-6 flex flex-col items-center gap-2 text-center">
+          <GraduationCap className="h-10 w-10 text-emerald-700" />
+          <h1 className="text-2xl font-semibold tracking-tight">Choose a new password</h1>
+        </div>
+        <div className="flex flex-col gap-4 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
+          <div className="grid gap-1.5">
+            <Label htmlFor="newpw">New password</Label>
             <Input
-              placeholder="New account name…"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && create()}
+              id="newpw"
+              type="password"
+              autoComplete="new-password"
+              placeholder="at least 6 characters"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && submit()}
             />
-            <Button onClick={create} disabled={!name.trim()}>
-              <UserRoundPlus className="mr-1 h-4 w-4" /> Create
-            </Button>
           </div>
-
-          <div className="flex items-center gap-3">
-            <div className="h-px flex-1 bg-stone-200" />
-            <span className="text-xs text-stone-400">or</span>
-            <div className="h-px flex-1 bg-stone-200" />
-          </div>
-
-          <Button variant="outline" onClick={onDemo} className="w-full">
-            <Eye className="mr-1.5 h-4 w-4" /> Try it first — 20-word demo, no account needed
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <Button onClick={submit} disabled={busy || password.length < 6}>
+            {busy ? '…' : 'Set new password'}
           </Button>
-
-          <p className="text-center text-xs text-stone-400">
-            Profiles and progress are saved locally in this browser — each account gets its own
-            deck, levels and streak.
-          </p>
         </div>
       </div>
     </div>
