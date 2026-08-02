@@ -215,8 +215,11 @@ function StudyApp({
   const streak = useMemo(() => streakDays(state.history, now), [state.history, now])
   const reviewsToday = state.history[todayKey(now)] ?? 0
 
+  const lastActionRef = useRef<{ prev: Card; key: string; wasNew: boolean } | null>(null)
+
   const applyResult = useCallback((card: Card, next: Card, t: number) => {
     const key = todayKey(t)
+    lastActionRef.current = { prev: card, key, wasNew: !card.introduced }
     setState((s) => ({
       ...s,
       cards: s.cards.map((c) => (c.id === card.id ? next : c)),
@@ -226,6 +229,22 @@ function StudyApp({
         : { ...s.introLog, [key]: (s.introLog[key] ?? 0) + 1 },
     }))
     setSessionCount((n) => n + 1)
+  }, [])
+
+  /** Backspace: reverse the last grade and bring the card back. */
+  const undo = useCallback(() => {
+    const last = lastActionRef.current
+    if (!last) return
+    lastActionRef.current = null
+    setState((s) => ({
+      ...s,
+      cards: s.cards.map((c) => (c.id === last.prev.id ? last.prev : c)),
+      history: { ...s.history, [last.key]: Math.max(0, (s.history[last.key] ?? 1) - 1) },
+      introLog: last.wasNew
+        ? { ...s.introLog, [last.key]: Math.max(0, (s.introLog[last.key] ?? 1) - 1) }
+        : s.introLog,
+    }))
+    setSessionCount((n) => Math.max(0, n - 1))
   }, [])
 
   const grade = useCallback(
@@ -376,6 +395,7 @@ function StudyApp({
             reviewsToday={reviewsToday}
             onGrade={grade}
             onSimple={gradeBinary}
+            onUndo={undo}
             grading={state.grading}
             onToggleGrading={setGrading}
             goAdd={() => setTab('add')}
@@ -415,6 +435,7 @@ function ReviewView({
   reviewsToday,
   onGrade,
   onSimple,
+  onUndo,
   grading,
   onToggleGrading,
   goAdd,
@@ -430,6 +451,7 @@ function ReviewView({
   reviewsToday: number
   onGrade: (card: Card, g: Grade) => void
   onSimple: (card: Card, correct: boolean) => void
+  onUndo: () => void
   grading: 'simple' | 'grades'
   onToggleGrading: (m: 'simple' | 'grades') => void
   goAdd: () => void
@@ -478,6 +500,13 @@ function ReviewView({
       if (!card) return
       const k = e.key.toLowerCase()
 
+      // backspace → undo last grade, card comes back
+      if (e.key === 'Backspace') {
+        e.preventDefault()
+        onUndo()
+        return
+      }
+
       // f / h / p → replay pronunciation
       if (k === 'f' || k === 'h' || k === 'p') {
         e.preventDefault()
@@ -513,7 +542,7 @@ function ReviewView({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [card, revealed, pick, pickSimple, grading, reveal, playAudio])
+  }, [card, revealed, pick, pickSimple, grading, reveal, playAudio, onUndo])
 
   if (!card) {
     const next = nextDue(cards, now)
@@ -562,6 +591,9 @@ function ReviewView({
           >
             {grading === 'simple' ? '+/− scoring' : '4-grade scoring'}
           </button>
+          <span className="hidden text-xs text-stone-300 sm:inline" title="Undo last grade">
+            ⌫ undo
+          </span>
           {sessionCount} this session · {reviewsToday} today
         </span>
       </div>
