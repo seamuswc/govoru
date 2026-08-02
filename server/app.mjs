@@ -59,7 +59,7 @@ async function sendResetEmail(email, link) {
     method: 'POST',
     headers: { authorization: `Bearer ${RESEND_API_KEY}`, 'content-type': 'application/json' },
     body: JSON.stringify({
-      from: 'Govoru <onboarding@resend.dev>',
+      from: 'Govoru <support@govoru.xyz>',
       to: [email],
       subject: 'Reset your Govoru password',
       html: `<p>You asked to reset your Govoru password.</p><p><a href="${link}">${link}</a></p><p>This link works for 1 hour. If you didn't ask for it, ignore this email.</p>`,
