@@ -1486,14 +1486,25 @@ function AuthScreen({
               {notice && <p className="text-sm text-emerald-700">{notice}</p>}
 
               <Button onClick={submit} disabled={busy || !email.trim() || (mode !== 'forgot' && !password)}>
-                {busy
-                  ? '…'
-                  : mode === 'login'
-                    ? 'Sign in'
-                    : mode === 'register'
-                      ? 'Continue to payment'
-                      : 'Email me a reset link'}
+                {busy ? (
+                  <span className="flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    {mode === 'register' ? 'Preparing your payment…' : 'Please wait…'}
+                  </span>
+                ) : mode === 'login' ? (
+                  'Sign in'
+                ) : mode === 'register' ? (
+                  'Continue to payment'
+                ) : (
+                  'Email me a reset link'
+                )}
               </Button>
+              {busy && mode === 'register' && (
+                <p className="text-center text-xs text-stone-400">
+                  Generating your personal payment address — this can take up to a minute. Don't
+                  close the page.
+                </p>
+              )}
 
               <p className="text-center text-xs text-stone-400">
                 Progress syncs to your account across devices. Signed-out visitors get the 20-word
