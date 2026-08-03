@@ -1431,7 +1431,8 @@ function AuthScreen({
                     </button>
                   ))}
                   <p className="col-span-2 text-center text-[11px] text-stone-400">
-                    Payment in ETH (Ethereum) only · you'll get the payment screen after signing up
+                    Payment in USDC (Ethereum network) only · you'll get the payment screen after
+                    signing up
                   </p>
                 </div>
               )}
@@ -1461,7 +1462,7 @@ function AuthScreen({
   )
 }
 
-// ─── ETH payment screen (register paywall + renewal) ────────────────────────
+// ─── USDC payment screen (register paywall + renewal) ───────────────────────
 
 function PayScreen({
   email,
@@ -1495,10 +1496,10 @@ function PayScreen({
       .catch((e) => setError(e instanceof Error ? e.message : 'Something went wrong'))
   }, [renewal, token, plan])
 
-  // QR for wallet apps: ethereum:<address>?value=<wei>
+  // QR for wallet apps (EIP-681 USDC transfer, pre-fills token + amount)
   useEffect(() => {
     if (!payment) return
-    QRCode.toDataURL(`ethereum:${payment.address}?value=${payment.wei}`, {
+    QRCode.toDataURL(payment.qr, {
       margin: 1,
       width: 200,
       color: { dark: '#1c1917', light: '#ffffff' },
@@ -1591,11 +1592,11 @@ function PayScreen({
                     Send exactly
                   </div>
                   <button
-                    onClick={() => copy(payment.eth, 'amount')}
+                    onClick={() => copy(payment.usdc, 'amount')}
                     className="mt-0.5 break-all font-mono text-lg font-semibold text-emerald-700 hover:underline"
                     title="Tap to copy"
                   >
-                    {payment.eth} ETH
+                    {payment.usdc} USDC
                   </button>
                   <div className="text-xs text-stone-400">
                     ≈ ${payment.usd} · {copied === 'amount' ? 'Copied ✓' : 'tap to copy'}
@@ -1627,8 +1628,9 @@ function PayScreen({
                 Check now
               </Button>
               <p className="text-center text-[11px] leading-relaxed text-stone-400">
-                Ethereum mainnet only. Send the <strong>exact</strong> amount shown — it's how we
-                match your payment. Confirmation usually takes 1–2 minutes.
+                <strong>USDC on Ethereum mainnet</strong> only. Send the <strong>exact</strong>{' '}
+                amount shown — it's how we match your payment. Confirmation usually takes 1–2
+                minutes.
               </p>
             </>
           ) : (
