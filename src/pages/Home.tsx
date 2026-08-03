@@ -1431,8 +1431,8 @@ function AuthScreen({
                     </button>
                   ))}
                   <p className="col-span-2 text-center text-[11px] text-stone-400">
-                    Payment in USDC (Ethereum network) only · you'll get the payment screen after
-                    signing up
+                    Payment in USDC or USDT (all major networks) · you'll get the payment screen
+                    after signing up
                   </p>
                 </div>
               )}
@@ -1596,7 +1596,7 @@ function PayScreen({
                     className="mt-0.5 break-all font-mono text-lg font-semibold text-emerald-700 hover:underline"
                     title="Tap to copy"
                   >
-                    {payment.usdc} USDC
+                    {payment.usdc} USDC / USDT
                   </button>
                   <div className="text-xs text-stone-400">
                     ≈ ${payment.usd} · {copied === 'amount' ? 'Copied ✓' : 'tap to copy'}
@@ -1628,9 +1628,10 @@ function PayScreen({
                 Check now
               </Button>
               <p className="text-center text-[11px] leading-relaxed text-stone-400">
-                <strong>USDC on Ethereum mainnet</strong> only. Send the <strong>exact</strong>{' '}
-                amount shown — it's how we match your payment. Confirmation usually takes 1–2
-                minutes.
+                <strong>USDC or USDT</strong> on Ethereum, Arbitrum, Base, Optimism, Polygon, or
+                BSC — send the <strong>exact</strong> amount shown, it's how we match your payment.
+                The QR is mainnet USDC; manual senders can use any of these networks. Confirmation
+                usually takes 1–2 minutes.
               </p>
             </>
           ) : (
