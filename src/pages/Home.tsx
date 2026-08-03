@@ -1674,9 +1674,9 @@ function PayScreen({
               </Button>
               <p className="text-center text-[11px] leading-relaxed text-stone-400">
                 <strong>USDC or USDT</strong> on Ethereum, Arbitrum, Base, Optimism, Polygon, or
-                BSC — send the <strong>exact</strong> amount shown, it's how we match your payment.
-                The QR is mainnet USDC; manual senders can use any of these networks. Confirmation
-                usually takes 1–2 minutes.
+                BSC. This address is unique to this payment — we detect your transfer
+                automatically. The QR is mainnet USDC; manual senders can use any of these
+                networks. Confirmation usually takes 1–2 minutes.
               </p>
             </>
           ) : (
