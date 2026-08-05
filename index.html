@@ -3,10 +3,74 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SRS Fluency</title>
+    <title>Govoru — Learn Russian: 5,000 Words with SRS Flashcards & Audio</title>
+    <meta
+      name="description"
+      content="Master Russian vocabulary from zero to fluency. 5,000 hand-picked words, full verb conjugations, native-quality audio, and spaced repetition that adapts to you. $5/month."
+    />
+    <link rel="canonical" href="https://govoru.xyz/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://govoru.xyz/" />
+    <meta property="og:title" content="Govoru — Learn Russian with Spaced Repetition" />
+    <meta
+      property="og:description"
+      content="5,000 hand-picked Russian words, full verb conjugations, and native audio. Zero to fluency with spaced repetition. $5/month."
+    />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Govoru — Learn Russian with Spaced Repetition" />
+    <meta
+      name="twitter:description"
+      content="5,000 hand-picked Russian words, full verb conjugations, and native audio. Zero to fluency with spaced repetition. $5/month."
+    />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Govoru",
+        "url": "https://govoru.xyz/",
+        "applicationCategory": "EducationalApplication",
+        "operatingSystem": "Web",
+        "description": "Spaced-repetition app for learning Russian: 5,000 hand-picked words, full verb conjugations, and native-quality audio.",
+        "inLanguage": "en",
+        "teaches": "Russian",
+        "offers": {
+          "@type": "Offer",
+          "price": "5.00",
+          "priceCurrency": "USD",
+          "description": "Monthly subscription (yearly plan available)"
+        }
+      }
+    </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Static landing splash: indexed by search engines and shown while the
+           app loads. React replaces this content when it mounts. -->
+      <main
+        style="
+          max-width: 640px;
+          margin: 0 auto;
+          padding: 64px 24px;
+          font-family: -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+          color: #1c1917;
+        "
+      >
+        <h1 style="font-size: 32px; margin: 0 0 8px">Govoru — Russian from zero to fluency</h1>
+        <p style="font-size: 18px; color: #57534e; margin: 0 0 24px">
+          Learn the 5,000 most useful Russian words and every verb conjugation with spaced
+          repetition and native-quality audio. Short reviews whenever you like — no daily
+          limits — with progress synced across all your devices.
+        </p>
+        <ul style="font-size: 16px; line-height: 1.9; color: #44403c; padding-left: 20px">
+          <li>5,000 hand-picked words, ordered from most to least useful</li>
+          <li>Full verb conjugations — every form counts toward mastering the verb</li>
+          <li>Native-quality audio for every single word and form</li>
+          <li>Spaced repetition that adapts to what you actually remember</li>
+          <li>$5/month or $50/year — cancel anytime</li>
+        </ul>
+        <p style="font-size: 14px; color: #a8a29e; margin-top: 32px">Loading…</p>
+      </main>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
