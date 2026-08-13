@@ -97,6 +97,10 @@ const KIND_STYLES: Record<CardKind, string> = {
   conjugation: 'bg-violet-100 text-violet-800 border-violet-200',
 }
 
+/** True on phones/tablets (no physical keyboard) — hides keyboard hints. */
+const IS_TOUCH =
+  typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches
+
 function LevelPill({ level }: { level: number }) {
   return (
     <span
@@ -707,7 +711,7 @@ function ReviewView({
           >
             {grading === 'simple' ? '+/− scoring' : '4-grade scoring'}
           </button>
-          <span className="hidden text-xs text-stone-300 sm:inline" title="Undo last grade">
+          <span className="key-hint hidden text-xs text-stone-300 sm:inline" title="Undo last grade">
             ⌫ undo
           </span>
           {sessionCount} this session · {reviewsToday} today
@@ -762,7 +766,8 @@ function ReviewView({
             </div>
           ) : (
             <div className="mt-6 flex items-center justify-center gap-1 text-sm text-stone-400">
-              <Eye className="h-4 w-4" /> tap anywhere to reveal · f/h/p to listen
+              <Eye className="h-4 w-4" />{' '}
+              {IS_TOUCH ? 'tap anywhere to reveal' : 'tap anywhere to reveal · f/h/p to listen'}
             </div>
           )}
         </button>
